@@ -30,6 +30,8 @@ def get_bed_coords(chrom_reads, chrom_length, fragment_size, chrom, verbose):
     negative_tag_counts = 0
     shift = int(round(fragment_size / 2))
     taglist = []
+    scorelist = [] 
+    scoredictionnary = {} 
     print_return = ""
     for read in chrom_reads:
         chrom = read[0]
@@ -42,21 +44,25 @@ def get_bed_coords(chrom_reads, chrom_length, fragment_size, chrom, verbose):
             if verbose:
                 print_return += ("Ilegitimate read with start less than zero is ignored \n"
                                  + chrom + "\t" + str(start) + "\t" + str(
-                            end) + "\t" + name + "\t" + str(score) + "\t" + strand + "\n")
+                            end) + "\t" + name + "\t" + score + "\t" + strand + "\n")
         elif (end >= chrom_length):
             if verbose:
                 print_return += (
                             "Ilegitimate read with end beyond chromosome length " + str(chrom_length) + " is ignored \n"
                             + chrom + "\t" + str(start) + "\t" + str(
-                        end) + "\t" + name + "\t" + str(score) + "\t" + strand + "\n")
+                        end) + "\t" + name + "\t" + score + "\t" + strand + "\n")
         else:
             if (strand == '+'):
                 position = start + shift
                 # If the position is beyond limit then don't shift.
                 if (position >= chrom_length):
                     position = chrom_length - 1
+                scoredictionnary[str(position)]=score
                 taglist.append(position)
-                postive_tag_counts += 1
+                #postive_tag_counts += 1
+                postive_tag_counts += score 
+
+
 
             elif (strand == '-'):
                 position = end - 1 - shift
@@ -64,19 +70,25 @@ def get_bed_coords(chrom_reads, chrom_length, fragment_size, chrom, verbose):
                 # beyond zero, use zero
                 if (position < 0):
                     position = 0  # UCSC genome coordinate is 0-based
+                scoredictionnary[str(position)]=score
                 taglist.append(position)
-                negative_tag_counts += 1
-    taglist.sort()
+                #negative_tag_counts += 1
+                negative_tag_counts += score 
 
-    total_tag_counts = postive_tag_counts + negative_tag_counts
+    taglist.sort()
+    for i in range(0, len(taglist)):
+        scorelist.append(scoredictionnary[str(taglist[i])])
+
+    total_tag_counts = round(postive_tag_counts + negative_tag_counts)
     print_return += 'Total count of ' + chrom + ' tags: ' + str(total_tag_counts)
     if verbose:
         print_return += ('  ('+str(postive_tag_counts) + ' positive tags, ' + str(negative_tag_counts) + ' negative tags)')
 
-    return (taglist, print_return)
+    #return (taglist, print_return,scorelist)
+    return (taglist, print_return,scorelist,total_tag_counts) 
 
 
-def Generate_windows_and_count_tags(taglist, chrom, chrom_length, window_size):
+def Generate_windows_and_count_tags(taglist, chrom, chrom_length, window_size,scorelist):   
     """
     taglist: sorted list of positions that includes every tag on a chromosome
     window_size: the artificial bin size for binning the tags
@@ -93,17 +105,16 @@ def Generate_windows_and_count_tags(taglist, chrom, chrom_length, window_size):
     """
     chrom_graph = []
     total_tag_count = 0
-
     if (len(taglist) > 0):
         current_window_start = (taglist[0] // window_size) * window_size
-        tag_count_in_current_window = 1
-
+        # tag_count_in_current_window = 1
+        tag_count_in_current_window = scorelist[0] 
         for i in range(1, len(taglist)):
             start = (taglist[i] // window_size) * window_size
-
+            score = scorelist[i] 
             if start == current_window_start:
-                tag_count_in_current_window += 1
-
+                # tag_count_in_current_window += 1 
+                tag_count_in_current_window += score  
             elif start > current_window_start:
                 # All the tags in the previous window have been counted
                 current_window_end = current_window_start + window_size - 1
@@ -111,12 +122,12 @@ def Generate_windows_and_count_tags(taglist, chrom, chrom_length, window_size):
 
                 if current_window_end < chrom_length:
                     # write the window to file
-                    output = (chrom, current_window_start, current_window_end, tag_count_in_current_window)
+                    output = (chrom, current_window_start, current_window_end, round(tag_count_in_current_window))
                     chrom_graph.append(output)
                     total_tag_count += tag_count_in_current_window
 
                 current_window_start = start
-                tag_count_in_current_window = 1
+                tag_count_in_current_window = score
 
             else:
                 sys.stderr.write("Error!")
@@ -125,11 +136,11 @@ def Generate_windows_and_count_tags(taglist, chrom, chrom_length, window_size):
         current_window_end = current_window_start + window_size - 1
         # if the window goes beyond the chromsome limit, it is discarded.
         if current_window_end < chrom_length:
-            output = (chrom, current_window_start, current_window_end, tag_count_in_current_window)
+            output = (chrom, current_window_start, current_window_end, round(tag_count_in_current_window))
             chrom_graph.append(output)
             total_tag_count += tag_count_in_current_window
 
-    return (chrom_graph, total_tag_count)
+    return (chrom_graph, round(total_tag_count))
 
 
 def makeGraphFile(args, filtered, chrom, chrom_length):
@@ -140,13 +151,10 @@ def makeGraphFile(args, filtered, chrom, chrom_length):
         bed_file_name = bed_file_name + '_filtered.npy'
     else:
         bed_file_name = bed_file_name + '.npy'
-
     chrom_reads = np.load(bed_file_name, allow_pickle=True)
-
-    tag_list, print_return = get_bed_coords(chrom_reads, chrom_length, args.fragment_size, chrom, args.verbose)
-    
-    chrom_graph, tag_count = Generate_windows_and_count_tags(tag_list, chrom, chrom_length, args.window_size)
-
+    tag_list, print_return,scorelist, finalCount = get_bed_coords(chrom_reads, chrom_length, args.fragment_size, chrom, args.verbose)  
+    #chrom_graph, tag_count = Generate_windows_and_count_tags(tag_list, chrom, chrom_length, args.window_size)
+    chrom_graph, tag_count = Generate_windows_and_count_tags(tag_list, chrom, chrom_length, args.window_size,scorelist)
 
     file_save_name = file + '_' + chrom
     if filtered:
@@ -157,7 +165,11 @@ def makeGraphFile(args, filtered, chrom, chrom_length):
     #graph_dtype = np.dtype([('chrom', 'U6'), ('start', np.int32), ('end', np.int32), ('count', np.int32)])
     np_chrom_graph = np.array(chrom_graph, dtype=object)
     np.save(file_save_name, np_chrom_graph)
+    if finalCount != tag_count :  
+        print("problem") 
     return (tag_count, print_return)
+
+
 
 
 def main(args, pool, filtered=False):
@@ -181,6 +193,7 @@ def main(args, pool, filtered=False):
     total_tag_count = 0
     for result in makeGraphFile_result:
         total_tag_count += result[0]
+        #print("result1")
         print(result[1])
 
     return (total_tag_count)
